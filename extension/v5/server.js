@@ -1,5 +1,8 @@
 const express = require("express");
-const puppeteer = require("puppeteer");
+const puppeteer = require("puppeteer-extra");
+const StealthPlugin = require("puppeteer-extra-plugin-stealth");
+
+puppeteer.use(StealthPlugin());
 
 const app = express();
 const PORT = 3000;
@@ -99,4 +102,4 @@ app.get("/proxy", async (req, res) => {
   });
   
 
-  app.listen(PORT, () => console.log(`Proxy server running on port ${PORT}`));
+app.listen(PORT, () => console.log(`Proxy server running on port ${PORT}`));
