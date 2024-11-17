@@ -29,7 +29,9 @@ document.addEventListener("DOMContentLoaded", () => {
         <p>Hidden Input Fields: ${data.inputStats.hiddenInputs}</p>
       `;
       openBtn.style.display = "block";
-    } catch (error) {
+    } 
+    catch (error) 
+    {
       console.error("Error fetching the page:", error);
       alert("Failed to load the page.");
     }
@@ -39,7 +41,8 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       new URL(string);
       return true;
-    } catch (_) {
+    } 
+    catch (_) {
       return false;
     }
   }
@@ -53,7 +56,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
   openBtn.addEventListener("click", () => {
     const url = urlInput.value.trim();
-    if (!isValidUrl(url)) {
+    if (!isValidUrl(url)) 
+    {
       alert("Please enter a valid URL.");
       return;
     }
@@ -65,20 +69,28 @@ document.addEventListener("DOMContentLoaded", () => {
     openBtn.style.display = "block";
   });
 
-  // Load the dark mode state from local storage
-  if (localStorage.getItem("darkMode") === "enabled") {
-    document.body.classList.add("dark-mode");
-    darkModeBtn.textContent = "Light Mode";
-  } else {
-    darkModeBtn.textContent = "Dark Mode";
-  }
+  // Load the state from extension settings
+  chrome.storage.sync.get("darkMode", (data) => {
+    if (data.darkMode === "enabled") 
+      {
+      document.body.classList.add("dark-mode");
+      darkModeBtn.textContent = "Light Mode";
+    } 
+    else 
+    {
+      darkModeBtn.textContent = "Dark Mode";
+    }
+  });
 
   darkModeBtn.addEventListener("click", () => {
-    if (document.body.classList.toggle("dark-mode")) {
-      localStorage.setItem("darkMode", "enabled");
+    if (document.body.classList.toggle("dark-mode")) 
+    {
+      chrome.storage.sync.set({ darkMode: "enabled" });
       darkModeBtn.textContent = "Light Mode";
-    } else {
-      localStorage.setItem("darkMode", "disabled");
+    } 
+    else 
+    {
+      chrome.storage.sync.set({ darkMode: "disabled" });
       darkModeBtn.textContent = "Dark Mode";
     }
   });
