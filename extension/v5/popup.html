@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sandboxed Website Viewer</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      font-family: Arial, sans-serif;
+      background-color: #f4f4f9;
+      color: #333;
+      width: 400px; /* Set a fixed width for the popup */
+      height: 600px; /* Set a fixed height for the popup */
+    }
+    h1 {
+      margin-bottom: 20px;
+      color: #4a90e2;
+    }
+    #iframe-container {
+      width: 100%;
+      height: 50vh; /* Adjusted height */
+      margin-top: 20px;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+    }
+    #stats {
+      margin-top: 10px;
+      font-size: 14px;
+      color: #666;
+    }
+    input[type="text"] {
+      width: 100%; /* Adjusted width */
+      padding: 10px;
+      margin-bottom: 20px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+    button {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 4px;
+      background-color: #4a90e2;
+      color: white;
+      cursor: pointer;
+      transition: background-color 0.3s ease;
+    }
+    button:hover {
+      background-color: #357ab8;
+    }
+    button:active {
+      background-color: #2c5a8a;
+    }
+    #button-container {
+      display: flex;
+      width: 100%; /* Adjusted width */
+      justify-content: space-between; /* Adjusted alignment */
+      gap: 10px;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Sandboxed Website Viewer</h1>
+  <input type="text" id="urlInput" placeholder="Enter website URL" />
+  <div id="button-container">
+    <button id="loadBtn">Load</button>
+    <button id="clearBtn">Clear</button>
+    <button id="openBtn">Open</button>
+  </div>
+  <div id="stats"></div>
+  <div id="iframe-container">
+    <iframe id="sandboxIframe"></iframe>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
