@@ -14,8 +14,8 @@
       font-family: Arial, sans-serif;
       background-color: #f4f4f9;
       color: #333;
-      width: 400px; /* Set a fixed width for the popup */
-      height: 600px; /* Set a fixed height for the popup */
+      width: 400px; 
+      height: 600px; 
     }
     h1 {
       margin-bottom: 20px;
@@ -69,11 +69,30 @@
       gap: 10px;
       margin-top: 20px;
     }
+    .dark-mode {
+      background-color: #333;
+      color: #f4f4f9;
+    }
+    .dark-mode input[type="text"] {
+      background-color: #555;
+      color: #f4f4f9;
+      border: 1px solid #777;
+    }
+    .dark-mode button {
+      background-color: #555;
+    }
+    .dark-mode button:hover {
+      background-color: #444;
+    }
+    .dark-mode button:active {
+      background-color: #333;
+    }
   </style>
 </head>
 <body>
   <h1>Sandboxed Website Viewer</h1>
   <input type="text" id="urlInput" placeholder="Enter website URL" />
+  <button id="darkModeBtn">Dark Mode</button>
   <div id="button-container">
     <button id="loadBtn">Load</button>
     <button id="clearBtn">Clear</button>
