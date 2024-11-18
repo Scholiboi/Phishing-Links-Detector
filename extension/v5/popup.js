@@ -26,7 +26,6 @@ document.addEventListener("DOMContentLoaded", () => {
       // Display the input field stats
       statsDiv.innerHTML = `
         <p>Total Input Fields: ${data.inputStats.totalInputs}</p>
-        <p>Hidden Input Fields: ${data.inputStats.hiddenInputs}</p>
       `;
       openBtn.style.display = "block";
     } 
