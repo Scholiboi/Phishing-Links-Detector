@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Phishing Link Verifier</title>
+  <style>
+    body { font-family: Arial, sans-serif; min-width: 200px; }
+    #result { margin-top: 10px; font-weight: bold; }
+    button { width: 100%; padding: 8px; }
+  </style>
+</head>
+<body>
+  <button id="verifyBtn">Verify This Site</button>
+  <div id="result"></div>
+  <hr>
+  <div>
+    <strong>Cached Websites:</strong>
+    <ul id="cacheList" style="max-height:150px;overflow:auto;"></ul>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
