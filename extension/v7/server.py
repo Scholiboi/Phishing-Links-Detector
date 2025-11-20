@@ -77,21 +77,49 @@ def get_url_features(url):
     """
     features = {}
     
-    # More careful URL normalization
-    normalized_url = url.strip()
+    # Parse the URL to extract domain
+    try:
+        parsed = urlparse(url if url.startswith(('http://', 'https://')) else 'http://' + url)
+        domain = parsed.netloc.lower().replace('www.', '')
+    except:
+        domain = ''
     
-    # Remove protocol (http:// or https://) but keep the rest intact
-    normalized_url = re.sub(r'^https?://', '', normalized_url)
+    # List of trusted domains that should be analyzed by domain only, not full URL
+    # This prevents false positives for legitimate services with dynamic URLs
+    TRUSTED_DOMAINS = {
+        'google.com', 'youtube.com', 'gmail.com', 'meet.google.com', 'docs.google.com',
+        'drive.google.com', 'calendar.google.com', 'maps.google.com', 'translate.google.com',
+        'microsoft.com', 'outlook.com', 'teams.microsoft.com', 'office.com',
+        'zoom.us', 'slack.com', 'discord.com', 'github.com', 'stackoverflow.com',
+        'wikipedia.org', 'reddit.com', 'twitter.com', 'facebook.com', 'instagram.com',
+        'linkedin.com', 'amazon.com', 'netflix.com', 'spotify.com', 'apple.com'
+    }
     
-    # Remove www. prefix only if present
-    normalized_url = re.sub(r'^www\.', '', normalized_url)
+    # Check if this is a trusted domain or subdomain
+    is_trusted = False
+    for trusted in TRUSTED_DOMAINS:
+        if domain == trusted or domain.endswith('.' + trusted):
+            is_trusted = True
+            break
     
-    # Remove trailing slash if it's the only path component
-    if normalized_url.endswith('/') and normalized_url.count('/') == 1:
-        normalized_url = normalized_url[:-1]
+    # For trusted domains, analyze only the domain, not the full URL with paths
+    if is_trusted:
+        print(f"[TRUSTED DOMAIN] Analyzing domain only: {domain}")
+        # Create a clean URL with just the domain for analysis
+        analysis_url = domain
+    else:
+        # For unknown domains, analyze the full URL
+        analysis_url = url.strip()
+        # Remove protocol (http:// or https://) but keep the rest intact
+        analysis_url = re.sub(r'^https?://', '', analysis_url)
+        # Remove www. prefix only if present
+        analysis_url = re.sub(r'^www\.', '', analysis_url)
+        # Remove trailing slash if it's the only path component
+        if analysis_url.endswith('/') and analysis_url.count('/') == 1:
+            analysis_url = analysis_url[:-1]
     
-    # Use normalized URL for feature extraction
-    original_url = normalized_url
+    # Use the analysis URL for feature extraction
+    original_url = analysis_url
 
     url_chars = count_special_chars(original_url)
     for key, value in url_chars.items():
@@ -99,10 +127,10 @@ def get_url_features(url):
     features['length_url'] = len(original_url)
 
     # Add protocol back for parsing
-    url = 'http://' + normalized_url
+    parse_url = 'http://' + analysis_url
 
     try:
-        parsed_url = urlparse(url)
+        parsed_url = urlparse(parse_url)
         domain = parsed_url.netloc
         path = parsed_url.path
         params = parsed_url.query
@@ -110,7 +138,7 @@ def get_url_features(url):
         if directory.startswith('/'):
             directory = directory[1:]
     except Exception:
-        print(f"Warning: Could not parse URL '{url}'.")
+        print(f"Warning: Could not parse URL '{parse_url}'.")
         return {}
 
     try:

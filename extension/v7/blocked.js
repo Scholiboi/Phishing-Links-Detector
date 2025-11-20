@@ -7,7 +7,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Set up continue with risk handler
   const continueRisk = document.getElementById('continueRisk');
   if (continueRisk) {
-    continueRisk.addEventListener('click', (e) => {
+    continueRisk.addEventListener('click', async (e) => {
       e.preventDefault();
       const params = new URLSearchParams(window.location.search);
       const blockedUrl = params.get('url');
@@ -19,20 +19,31 @@ document.addEventListener('DOMContentLoaded', async () => {
           const domain = urlObj.hostname.replace(/^www\./, "");
           console.log('Extracted domain:', domain);
           
+          // Show processing message
+          showResult('🔓 Temporarily unlocking site...');
+          
           // Send message to background script to add temporary unlock
-          chrome.runtime.sendMessage({
-            action: 'temporaryUnlock',
-            domain: domain
-          }, (response) => {
-            console.log('Unlock response:', response);
-            // Small delay to ensure unlock is processed
+          const response = await new Promise((resolve) => {
+            chrome.runtime.sendMessage({
+              action: 'temporaryUnlock',
+              domain: domain
+            }, resolve);
+          });
+          
+          console.log('Unlock response:', response);
+          
+          if (response && response.success) {
+            showResult('✅ Site unlocked for 5 minutes. Redirecting...');
+            // Wait a bit longer to ensure unlock is processed
             setTimeout(() => {
               window.location.href = decodedUrl;
-            }, 100);
-          });
+            }, 500);
+          } else {
+            throw new Error('Failed to unlock site');
+          }
         } catch (err) {
           console.error('Error processing URL:', err);
-          showResult('❌ Error processing URL: ' + err.message);
+          showResult('❌ Error unlocking site: ' + err.message);
         }
       }
     });

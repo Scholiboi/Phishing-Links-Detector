@@ -38,18 +38,35 @@ function addTemporaryUnlock(domain) {
 // Listen for messages from blocked page
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log('[MESSAGE] Received:', message);
+  
   if (message.action === 'temporaryUnlock') {
-    addTemporaryUnlock(message.domain);
-    console.log('[MESSAGE] Current unlocks:', temporaryUnlocks);
-    sendResponse({ success: true });
+    try {
+      addTemporaryUnlock(message.domain);
+      console.log('[MESSAGE] Current unlocks:', temporaryUnlocks);
+      sendResponse({ success: true });
+    } catch (error) {
+      console.error('[MESSAGE] Error handling temporaryUnlock:', error);
+      sendResponse({ success: false, error: error.message });
+    }
     return true; // Keep message channel open
-  } else if (message.action === 'updateCache') {
-    // Update memory cache immediately
-    domainStatusCache[message.domain] = message.status;
-    console.log(`[CACHE UPDATE] Updated ${message.domain} to status ${message.status}`);
-    sendResponse({ success: true });
+  } 
+  
+  if (message.action === 'updateCache') {
+    try {
+      // Update memory cache immediately
+      domainStatusCache[message.domain] = message.status;
+      console.log(`[CACHE UPDATE] Updated ${message.domain} to status ${message.status}`);
+      sendResponse({ success: true });
+    } catch (error) {
+      console.error('[MESSAGE] Error handling updateCache:', error);
+      sendResponse({ success: false, error: error.message });
+    }
     return true;
   }
+  
+  // Unknown message type
+  sendResponse({ success: false, error: 'Unknown action' });
+  return true;
 });
 
 // Fetch all domains and their status from the server and cache them
