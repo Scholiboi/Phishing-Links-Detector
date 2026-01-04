@@ -328,6 +328,7 @@ def domain_status():
             is_trusted = True
             break
 
+
     # --- Google Safe Browsing for non-trusted domains ---
     GOOGLE_SAFE_BROWSING_API_KEY = os.environ.get('GOOGLE_SAFE_BROWSING_API_KEY')
     google_response = None
@@ -337,6 +338,19 @@ def domain_status():
         google_flagged = bool(google_response.get("matches")) if google_response else False
         if google_flagged:
             print(f"[SafeBrowsing] URL flagged as unsafe by Google Safe Browsing: {url}")
+        # Insert or update the domain in the DB based on Google Safe Browsing
+        try:
+            parsed_db = urlparse(url if url.startswith(('http://', 'https://')) else 'http://' + url)
+            domain_db = parsed_db.netloc.lower().replace('www.', '')
+            conn = get_db_connection()
+            # 0 = phishing, 1 = safe
+            status_val = 0 if google_flagged else 1
+            conn.execute('INSERT OR REPLACE INTO domain_status (domain, status) VALUES (?, ?)', (domain_db, status_val))
+            conn.commit()
+            conn.close()
+            print(f"[DB] Inserted/Updated {domain_db} as {'phishing' if status_val == 0 else 'safe'} in DB.")
+        except Exception as e:
+            print(f"[DB] Error inserting/updating domain: {e}")
 
     # BYPASS MODEL if trusted and not flagged by Google
     if is_trusted and not google_flagged:
