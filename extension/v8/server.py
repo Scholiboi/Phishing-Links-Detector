@@ -329,8 +329,9 @@ def domain_status():
             break
 
 
-    # --- Google Safe Browsing for non-trusted domains ---
+    # --- Google Safe Browsing first ---
     GOOGLE_SAFE_BROWSING_API_KEY = os.environ.get('GOOGLE_SAFE_BROWSING_API_KEY')
+    google_available = bool(GOOGLE_SAFE_BROWSING_API_KEY)
     google_response = None
     google_flagged = False
     if GOOGLE_SAFE_BROWSING_API_KEY:
@@ -352,18 +353,23 @@ def domain_status():
         except Exception as e:
             print(f"[DB] Error inserting/updating domain: {e}")
 
-    # BYPASS MODEL if trusted and not flagged by Google
-    if is_trusted and not google_flagged:
-        print(f"[TRUSTED BYPASS] {url} is trusted and not flagged by Google. Bypassing model.")
+    # If Google flags the URL, stop here and block immediately.
+    if google_flagged:
+        print(f"[GOOGLE BLOCK] {url} flagged by Google Safe Browsing. Skipping model.")
         return jsonify({
             'url': url,
             'google_safe_browsing': google_response,
             'google_flagged': google_flagged,
-            'model_prediction': 'TRUSTED DOMAIN',
-            'model_confidence': None,
-            'model_status': 1,
-            'model_reasoning': ['Trusted domain and not flagged by Google Safe Browsing.']
+            'google_available': google_available,
+            'model_prediction': 'PHISHING',
+            'model_confidence': 100.0,
+            'model_status': 0,
+            'model_reasoning': ['Flagged by Google Safe Browsing.']
         })
+
+    # If Google does not flag the URL, always evaluate with the model.
+    if is_trusted:
+        print(f"[TRUSTED DOMAIN] {url} passed Google Safe Browsing; continuing to model.")
 
     model, expected_features, explainer = load_model_and_explainer()
     if not model or not explainer:
@@ -378,7 +384,8 @@ def domain_status():
 
     prediction = model.predict(live_df)[0]
     probabilities = model.predict_proba(live_df)[0]
-    result_text = "PHISHING" if prediction == 1 else "Legitimate"
+    # The trained model uses class 0 for phishing and class 1 for legitimate.
+    result_text = "PHISHING" if prediction == 0 else "Legitimate"
     confidence = float(probabilities[prediction] * 100)
 
     # Generate SHAP explanations
@@ -409,7 +416,7 @@ def domain_status():
             })
 
     # Return status: 0 = block (phishing), 1 = allow (legitimate)
-    status = 0 if prediction == 1 else 1
+    status = 0 if prediction == 0 else 1
 
     # Log the prediction result
     print(f"[RESULT] Prediction: {result_text} (Confidence: {confidence:.2f}%) - Status: {status}")
@@ -419,6 +426,7 @@ def domain_status():
         'url': url,
         'google_safe_browsing': google_response,
         'google_flagged': google_flagged,
+        'google_available': google_available,
         'model_prediction': result_text,
         'model_confidence': confidence,
         'model_status': status,

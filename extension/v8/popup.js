@@ -31,9 +31,11 @@ document.getElementById('verifyBtn').addEventListener('click', () => {
         let resultType = 'safe';
 
         // Check Google Safe Browsing results
-        if (data.google_flagged) {
+          if (data.google_flagged) {
           resultMsg += '⚠️ Flagged by Google Safe Browsing\n';
           resultType = 'danger';
+          } else if (data.google_available === false || data.google_safe_browsing === null) {
+           resultMsg += 'Google Safe Browsing: Unavailable\n';
         } else if (data.google_safe_browsing && data.google_safe_browsing.matches) {
           resultMsg += '⚠️ Google Safe Browsing: Threat detected\n';
           resultType = 'danger';

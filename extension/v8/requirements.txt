@@ -6,3 +6,4 @@ pandas
 numpy
 shap
 python-dotenv
+xgboost

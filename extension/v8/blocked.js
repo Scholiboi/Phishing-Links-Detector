@@ -75,6 +75,8 @@ async function autoVerifySite() {
     let resultMsg = '';
     if (data.google_flagged) {
       resultMsg += '⚠️ Flagged by Google Safe Browsing!\n';
+    } else if (data.google_available === false || data.google_safe_browsing === null) {
+      resultMsg += 'Google Safe Browsing: Unavailable.\n';
     } else if (data.google_safe_browsing && data.google_safe_browsing.matches) {
       resultMsg += '⚠️ Google Safe Browsing: Threat detected!\n';
     } else {
@@ -157,6 +159,8 @@ function showResult(msg) {
     <div class="value">
       ${googleStatus.includes('Not flagged')
         ? `<svg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='#22c55e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M20 6 9 17l-5-5'/></svg> Clean`
+        : googleStatus.includes('Unavailable')
+          ? `<svg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='#f59e42' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='10'/><path d='M12 8v4'/><path d='M12 16h.01'/></svg> Unavailable`
         : `<svg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='#f59e42' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3l-8.47-14.14a2 2 0 0 0-3.42 0z'/><line x1='12' y1='9' x2='12' y2='13'/><line x1='12' y1='17' x2='12.01' y2='17'/></svg> Flagged`}
     </div>
   `;
