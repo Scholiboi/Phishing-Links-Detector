@@ -367,9 +367,22 @@ def domain_status():
             'model_reasoning': ['Flagged by Google Safe Browsing.']
         })
 
-    # If Google does not flag the URL, always evaluate with the model.
-    if is_trusted:
-        print(f"[TRUSTED DOMAIN] {url} passed Google Safe Browsing; continuing to model.")
+    # If not flagged by Google but is a trusted domain, auto-allow it.
+    if is_trusted and not google_flagged:
+        print(f"[TRUSTED BYPASS] {url} is trusted and not flagged by Google. Auto-allowing.")
+        return jsonify({
+            'url': url,
+            'google_safe_browsing': google_response,
+            'google_flagged': google_flagged,
+            'google_available': google_available,
+            'model_prediction': 'TRUSTED DOMAIN',
+            'model_confidence': None,
+            'model_status': 1,
+            'model_reasoning': ['Trusted domain not flagged by Google Safe Browsing.']
+        })
+
+    # If Google does not flag the URL and domain is not trusted, evaluate with the model.
+    print(f"[MODEL CHECK] {url} not in trusted list and not flagged by Google. Evaluating with model.")
 
     model, expected_features, explainer = load_model_and_explainer()
     if not model or not explainer:
