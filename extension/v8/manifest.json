@@ -1,5 +1,5 @@
 {
-  "manifest_version": 3,
+  "manifest_version": 2,
   "name": "Website Blocker",
   "version": "1.0",
   "description": "Tracks new tabs/websites and blocks non-whitelisted sites.",
@@ -9,14 +9,20 @@
     "webRequestBlocking",
     "alarms",
     "storage",
-    "<all_urls>"
+    "<all_urls>",
+    "*://*/*"
   ],
 
   "background": {
-    "service_worker": "background.js"
+    "scripts": ["background.js"],
+    "persistent": true
   },
-  "action": {
+  "browser_action": {
     "default_popup": "popup.html"
-  }
+  },
+  "web_accessible_resources": [
+    "blocked.html",
+    "blocked.js"
+  ]
 }
   

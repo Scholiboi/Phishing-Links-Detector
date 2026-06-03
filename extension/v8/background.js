@@ -14,6 +14,7 @@ const DOMAIN_STATUS_URL = `${SERVER_BASE}/domain_status`;
 
 let domainStatusCache = {};
 let temporaryUnlocks = {}; // Store temporary unlocks with timestamps
+let blockedDomainsListener = null;
 
 // Check if domain is temporarily unlocked
 function isTemporarilyUnlocked(domain) {
@@ -92,23 +93,28 @@ async function fetchAndCacheAllDomains() {
 }
 
 // Load cache from storage on startup
-async function loadCacheFromStorage() {
-  try {
-    chrome.storage.local.get(['domainStatusCache'], (result) => {
-      if (chrome.runtime.lastError) {
-        console.error('[CACHE] Failed to load cache from storage:', chrome.runtime.lastError);
-        return;
-      }
-      if (result.domainStatusCache) {
-        domainStatusCache = result.domainStatusCache;
-        console.log('[CACHE] Loaded cache from storage:', domainStatusCache);
-      } else {
-        console.log('[CACHE] No cache found in storage, will fetch from server');
-      }
-    });
-  } catch (e) {
-    console.error('[CACHE] Failed to load cache from storage:', e);
-  }
+function loadCacheFromStorage() {
+  return new Promise((resolve) => {
+    try {
+      chrome.storage.local.get(['domainStatusCache'], (result) => {
+        if (chrome.runtime.lastError) {
+          console.error('[CACHE] Failed to load cache from storage:', chrome.runtime.lastError);
+          resolve();
+          return;
+        }
+        if (result.domainStatusCache) {
+          domainStatusCache = result.domainStatusCache;
+          console.log('[CACHE] Loaded cache from storage:', domainStatusCache);
+        } else {
+          console.log('[CACHE] No cache found in storage, will fetch from server');
+        }
+        resolve();
+      });
+    } catch (e) {
+      console.error('[CACHE] Failed to load cache from storage:', e);
+      resolve();
+    }
+  });
 }
 
 // Check domain status using cache, or query server if not found
@@ -148,14 +154,14 @@ function getBlocklistFromCache() {
 
 function updateBlockRules() {
   // For Manifest V2, use webRequest API
-  if (window.blockedDomainsListener) {
-    chrome.webRequest.onBeforeRequest.removeListener(window.blockedDomainsListener);
+  if (blockedDomainsListener) {
+    chrome.webRequest.onBeforeRequest.removeListener(blockedDomainsListener);
   }
   
-  // Filter for ALL URLs to intercept everything
-  const filter = { urls: ["<all_urls>"], types: ["main_frame"] };
+  // Filter for HTTP and HTTPS URLs to intercept everything
+  const filter = { urls: ["http://*/*", "https://*/*"], types: ["main_frame"] };
   
-  window.blockedDomainsListener = function(details) {
+  blockedDomainsListener = function(details) {
       try {
         const urlObj = new URL(details.url);
         
@@ -201,7 +207,7 @@ function updateBlockRules() {
     };
   
   chrome.webRequest.onBeforeRequest.addListener(
-    window.blockedDomainsListener,
+    blockedDomainsListener,
     filter,
     ["blocking"]
   );
@@ -220,21 +226,18 @@ async function refreshBlocklistAndRules(force = false) {
 }
 
 // --- INIT ---
-chrome.runtime.onInstalled.addListener(async () => {
+async function initialize() {
   await loadCacheFromStorage();
-  await refreshBlocklistAndRules(true);
+  updateBlockRules();
+  await refreshBlocklistAndRules();
+}
+
+// Initialize on background script load (covers installation, browser startup, and extension reloads)
+initialize();
+
+chrome.runtime.onInstalled.addListener(() => {
   chrome.alarms.create("refreshBlocklist", { periodInMinutes: UPDATE_INTERVAL_MINUTES });
 });
-
-chrome.runtime.onStartup.addListener(async () => {
-  await loadCacheFromStorage();
-  await refreshBlocklistAndRules();
-});
-
-// Initialize on first load
-(async () => {
-  await loadCacheFromStorage();
-})();
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "refreshBlocklist") {

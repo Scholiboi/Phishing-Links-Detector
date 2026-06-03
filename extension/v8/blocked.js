@@ -82,7 +82,10 @@ async function autoVerifySite() {
     } else {
       resultMsg += 'Google Safe Browsing: Not flagged.\n';
     }
-    resultMsg += `Model: ${data.model_prediction} (${data.model_confidence.toFixed(1)}% confidence)`;
+    const confidenceVal = (data.model_confidence !== null && data.model_confidence !== undefined) 
+      ? ` (${Number(data.model_confidence).toFixed(1)}% confidence)` 
+      : '';
+    resultMsg += `Model: ${data.model_prediction}${confidenceVal}`;
     if (data.model_status === 0) {
       resultMsg += '\nPhishing detected!';
       showResult(resultMsg);
@@ -169,19 +172,29 @@ function showResult(msg) {
   // Model item
   const modelItem = document.createElement('div');
   modelItem.className = 'analysis-item model';
-  const modelMatch = modelStatus.match(/Model: (\w+) \(([0-9.]+)% confidence\)/);
+  const modelMatch = modelStatus.match(/Model:\s*([A-Za-z0-9_\s\-]+?)(?:\s*\(([0-9.]+)%\s+confidence\))?\s*$/i);
   if (modelMatch) {
-    const prediction = modelMatch[1];
+    const prediction = modelMatch[1].trim();
     const confidence = modelMatch[2];
+    
+    let predictionHtml = '';
+    if (prediction === 'PHISHING') {
+      predictionHtml = `<svg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='#ff4757' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='10'/><line x1='15' y1='9' x2='9' y2='15'/><line x1='9' y1='9' x2='15' y2='15'/></svg> PHISHING`;
+    } else if (prediction === 'TRUSTED DOMAIN') {
+      predictionHtml = `<svg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='#22c55e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M20 6 9 17l-5-5'/></svg> Trusted Domain`;
+    } else {
+      predictionHtml = `<svg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='#22c55e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M20 6 9 17l-5-5'/></svg> ${prediction}`;
+    }
+    
+    const confidenceHtml = confidence ? ` (${confidence}%)` : '';
+    
     modelItem.innerHTML = `
       <h4 style="display:flex;align-items:center;gap:6px;">
         <svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='#ff6b35' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='3' width='18' height='18' rx='2' ry='2'/><path d='M9 9h6v6H9z'/></svg>
         AI Model Analysis
       </h4>
       <div class="value">
-        ${prediction === 'PHISHING'
-          ? `<svg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='#ff4757' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='10'/><line x1='15' y1='9' x2='9' y2='15'/><line x1='9' y1='9' x2='15' y2='15'/></svg> PHISHING`
-          : `<svg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='#22c55e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M20 6 9 17l-5-5'/></svg> ${prediction}`} (${confidence}%)
+        ${predictionHtml}${confidenceHtml}
       </div>
     `;
   } else {

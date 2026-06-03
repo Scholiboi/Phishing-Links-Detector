@@ -44,8 +44,10 @@ document.getElementById('verifyBtn').addEventListener('click', () => {
         }
 
         // Add model prediction
-        const confidence = data.model_confidence ? data.model_confidence.toFixed(1) : '?';
-        resultMsg += `AI Model: ${data.model_prediction} (${confidence}% confidence)`;
+        const confidenceStr = (data.model_confidence !== null && data.model_confidence !== undefined)
+          ? ` (${data.model_confidence.toFixed(1)}% confidence)`
+          : '';
+        resultMsg += `AI Model: ${data.model_prediction}${confidenceStr}`;
 
         if (data.model_status === 0) {
           resultMsg += '\n🚨 Phishing detected! Redirecting...';

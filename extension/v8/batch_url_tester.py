@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Batch test URLs against the phishing detector backend and save results to CSV.
 
-This CLI uses the same backend endpoint the browser extension relies on:
-/domain_status on the local Flask server. It prints live progress so you can
-watch the URLs being tested and writes the final results to a CSV file.
+Endpoint: /domain_status on the local Flask server.
+Dependencies: pip install requests rich
 """
 
 from __future__ import annotations
@@ -12,260 +11,463 @@ import argparse
 import csv
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Iterable
 
 import requests
 
+try:
+    from rich.console import Console
+    from rich.table import Table
+    from rich.panel import Panel
+    from rich.progress import (
+        Progress,
+        SpinnerColumn,
+        BarColumn,
+        TextColumn,
+        TimeElapsedColumn,
+        MofNCompleteColumn,
+    )
+    from rich.text import Text
+    from rich import box
+    from rich.rule import Rule
+    from rich.align import Align
+    RICH_AVAILABLE = True
+except ImportError:
+    RICH_AVAILABLE = False
+
 
 DEFAULT_BASE_URL = "http://localhost:5000"
+console = Console(highlight=False) if RICH_AVAILABLE else None
 
 
-def normalize_url(raw_url: str) -> str:
-    raw_url = raw_url.strip()
-    if not raw_url:
-        return ""
-    if raw_url.startswith(("http://", "https://")):
-        return raw_url
-    return f"http://{raw_url}"
+# ── Styles ────────────────────────────────────────────────────────────────────
+
+def verdict_style(v: str) -> str:
+    v = v.lower()
+    if "blocked" in v: return "bold red"
+    if "allowed" in v: return "bold green"
+    if "error"   in v: return "bold red"
+    return "bold yellow"
+
+def verdict_icon(v: str) -> str:
+    v = v.lower()
+    if "blocked" in v: return "✘"
+    if "allowed" in v: return "✔"
+    if "error"   in v: return "!"
+    return "?"
+
+def google_style(g: str) -> str:
+    return {"flagged": "bold red", "clean": "green"}.get(g, "dim white")
+
+def google_icon(g: str) -> str:
+    return {"flagged": "⚑", "clean": "✔", "unavailable": "–"}.get(g, "?")
+
+def conf_bar(conf) -> Text:
+    if conf is None:
+        return Text("n/a", style="dim white")
+    c = float(conf)
+    filled = int(c / 10)
+    bar = "█" * filled + "░" * (10 - filled)
+    color = "green" if c >= 75 else ("yellow" if c >= 50 else "red")
+    t = Text()
+    t.append(bar, style=color)
+    t.append(f" {c:5.1f}%", style=f"bold {color}")
+    return t
 
 
-def load_urls_from_file(file_path: Path) -> list[str]:
-    urls: list[str] = []
-    for line in file_path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line and not line.startswith("#"):
-            urls.append(line)
-    return urls
+# ── Input helpers ─────────────────────────────────────────────────────────────
 
+def normalize_url(u: str) -> str:
+    u = u.strip()
+    if not u: return ""
+    return u if u.startswith(("http://", "https://")) else f"http://{u}"
 
-def load_rows_from_csv(file_path: Path, url_column: str, label_column: str | None) -> list[dict]:
-    rows: list[dict] = []
-    with file_path.open("r", newline="", encoding="utf-8-sig") as csv_file:
-        reader = csv.DictReader(csv_file)
-        if not reader.fieldnames:
-            return rows
+def load_urls_from_file(p: Path) -> list[str]:
+    return [l.strip() for l in p.read_text("utf-8").splitlines()
+            if l.strip() and not l.strip().startswith("#")]
 
-        available_columns = [name.strip() for name in reader.fieldnames if name]
-        normalized_lookup = {name.lower(): name for name in available_columns}
-
-        chosen_url_column = normalized_lookup.get(url_column.lower())
-        if chosen_url_column is None:
-            chosen_url_column = available_columns[0]
-
-        chosen_label_column = None
-        if label_column:
-            chosen_label_column = normalized_lookup.get(label_column.lower())
-
+def load_rows_from_csv(p: Path, url_col: str, lbl_col: str | None) -> list[dict]:
+    rows = []
+    with p.open("r", newline="", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        if not reader.fieldnames: return rows
+        avail  = [n.strip() for n in reader.fieldnames if n]
+        lookup = {n.lower(): n for n in avail}
+        col_u  = lookup.get(url_col.lower(), avail[0])
+        col_l  = lookup.get(lbl_col.lower()) if lbl_col else None
         for row in reader:
-            raw_url = (row.get(chosen_url_column) or "").strip()
-            if not raw_url:
-                continue
-            rows.append(
-                {
-                    "url": raw_url,
-                    "expected_label": (row.get(chosen_label_column) or "").strip() if chosen_label_column else "",
-                }
-            )
+            raw = (row.get(col_u) or "").strip()
+            if raw:
+                rows.append({"url": raw,
+                             "expected_label": (row.get(col_l) or "").strip() if col_l else ""})
     return rows
-
-
-def load_urls(args: argparse.Namespace) -> list[str]:
-    urls: list[str] = []
-
-    if args.url:
-        urls.extend(args.url)
-
-    if args.file:
-        urls.extend(load_urls_from_file(Path(args.file)))
-
-    if not urls and not sys.stdin.isatty():
-        for line in sys.stdin:
-            line = line.strip()
-            if line and not line.startswith("#"):
-                urls.append(line)
-
-    normalized = [normalize_url(url) for url in urls]
-    return [url for url in normalized if url]
-
 
 def load_items(args: argparse.Namespace) -> list[dict]:
     if args.csv_input:
         return load_rows_from_csv(Path(args.csv_input), args.url_column, args.label_column)
+    urls: list[str] = list(args.url or [])
+    if args.file:
+        urls.extend(load_urls_from_file(Path(args.file)))
+    if not urls and not sys.stdin.isatty():
+        urls.extend(l.strip() for l in sys.stdin if l.strip() and not l.strip().startswith("#"))
+    return [{"url": u, "expected_label": ""} for u in (normalize_url(u) for u in urls) if u]
 
-    urls = load_urls(args)
-    return [{"url": url, "expected_label": ""} for url in urls]
 
+# ── API ───────────────────────────────────────────────────────────────────────
 
 def submit_url(base_url: str, url: str, timeout: float) -> dict:
-    endpoint = f"{base_url.rstrip('/')}/domain_status"
-    response = requests.post(endpoint, json={"url": url}, timeout=timeout)
-    response.raise_for_status()
-    return response.json()
+    r = requests.post(f"{base_url.rstrip('/')}/domain_status", json={"url": url}, timeout=timeout)
+    r.raise_for_status()
+    return r.json()
 
 
-def summarize_verdict(payload: dict) -> str:
-    if payload.get("google_flagged"):
-        return "blocked by Google Safe Browsing"
+# ── Result helpers ────────────────────────────────────────────────────────────
 
-    model_prediction = str(payload.get("model_prediction", "UNKNOWN")).upper()
-    model_status = payload.get("model_status")
-    if model_status == 0 or model_prediction == "PHISHING":
-        return "blocked by model"
-    if model_status == 1 or model_prediction in {"LEGITIMATE", "TRUSTED DOMAIN"}:
-        return "allowed"
+def summarize_verdict(p: dict) -> str:
+    if p.get("google_flagged"): return "blocked by Google Safe Browsing"
+    pred = str(p.get("model_prediction", "UNKNOWN")).upper()
+    st   = p.get("model_status")
+    if st == 0 or pred == "PHISHING":                       return "blocked by model"
+    if st == 1 or pred in {"LEGITIMATE", "TRUSTED DOMAIN"}:  return "allowed"
     return "unknown"
 
+def summarize_google(p: dict) -> str:
+    if not p.get("google_available"): return "unavailable"
+    return "flagged" if p.get("google_flagged") else "clean"
 
-def summarize_google_verdict(payload: dict) -> str:
-    if not payload.get("google_available"):
-        return "unavailable"
-    if payload.get("google_flagged"):
-        return "flagged"
-    return "clean"
+def normalize_label(label: str) -> str:
+    l = label.strip().lower()
+    if l in {"1","phishing","phish","malicious","bad","unsafe"}: return "phishing"
+    if l in {"0","legitimate","legit","safe","clean","benign"}:  return "legitimate"
+    return label
 
-
-def summarize_expected_label(expected_label: str) -> str:
-    label = expected_label.strip().lower()
-    if not label:
-        return ""
-    if label in {"1", "phishing", "phish", "malicious", "bad", "unsafe"}:
-        return "phishing"
-    if label in {"0", "legitimate", "legit", "safe", "clean", "benign"}:
-        return "legitimate"
-    return expected_label
-
-
-def format_reasoning(reasoning: Iterable[dict]) -> str:
+def fmt_reasoning(items: Iterable[dict | str]) -> str:
     parts = []
-    for item in reasoning:
-        feature = item.get("feature", "feature")
-        value = item.get("value", "?")
-        impact = item.get("impact", "impact")
-        parts.append(f"{feature}={value} ({impact})")
+    for i in items:
+        if isinstance(i, dict):
+            parts.append(f"{i.get('feature','?')}={i.get('value','?')} ({i.get('impact','?')})")
+        else:
+            parts.append(str(i))
     return " | ".join(parts)
-
 
 def build_row(url: str, payload: dict, error: str = "") -> dict:
     reasoning = payload.get("model_reasoning") or []
     return {
-        "url": url,
-        "verdict": summarize_verdict(payload) if not error else "error",
-        "expected_label": "",
-        "label_match": "",
-        "google_available": payload.get("google_available", ""),
-        "google_verdict": summarize_google_verdict(payload) if not error else "unavailable",
-        "google_safe_browsing": json.dumps(payload.get("google_safe_browsing", {}), ensure_ascii=True, sort_keys=True),
-        "model_prediction": payload.get("model_prediction", ""),
-        "model_status": payload.get("model_status", ""),
-        "model_confidence": payload.get("model_confidence", ""),
-        "google_flagged": payload.get("google_flagged", ""),
-        "reasoning": format_reasoning(reasoning) if reasoning else "",
-        "error": error,
-        "raw_json": json.dumps(payload, ensure_ascii=True, sort_keys=True),
+        "url":                  url,
+        "verdict":              summarize_verdict(payload) if not error else "error",
+        "expected_label":       "",
+        "label_match":          "",
+        "google_available":     payload.get("google_available", ""),
+        "google_verdict":       summarize_google(payload) if not error else "unavailable",
+        "google_safe_browsing": json.dumps(payload.get("google_safe_browsing", {}), sort_keys=True),
+        "model_prediction":     payload.get("model_prediction", ""),
+        "model_status":         payload.get("model_status", ""),
+        "model_confidence":     payload.get("model_confidence", ""),
+        "google_flagged":       payload.get("google_flagged", ""),
+        "reasoning":            fmt_reasoning(reasoning),
+        "error":                error,
+        "raw_json":             json.dumps(payload, sort_keys=True),
     }
 
 
+# ── Banner ────────────────────────────────────────────────────────────────────
+
+BANNER = """\
+  ██████╗ ██╗  ██╗██╗███████╗██╗  ██╗ ██████╗██╗  ██╗███████╗ ██████╗██╗  ██╗
+  ██╔══██╗██║  ██║██║██╔════╝██║  ██║██╔════╝██║  ██║██╔════╝██╔════╝██║ ██╔╝
+  ██████╔╝███████║██║███████╗███████║██║     ███████║█████╗  ██║     █████╔╝ 
+  ██╔═══╝ ██╔══██║██║╚════██║██╔══██║██║     ██╔══██║██╔══╝  ██║     ██╔═██╗ 
+  ██║     ██║  ██║██║███████║██║  ██║╚██████╗██║  ██║███████╗╚██████╗██║  ██╗
+  ╚═╝     ╚═╝  ╚═╝╚═╝╚══════╝╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝╚══════╝ ╚═════╝╚═╝  ╚═╝"""
+
+def print_banner(n: int, base_url: str) -> None:
+    console.print(Text(BANNER, style="bold red"))
+    console.print(
+        Align.center(
+            Text(
+                f"  URL Phishing Detector  ·  {n} URL{'s' if n != 1 else ''}  ·  {base_url}  ",
+                style="bold white on red",
+            )
+        )
+    )
+    console.print()
+
+
+# ── Summary table ─────────────────────────────────────────────────────────────
+
+def make_summary_table(rows: list[dict]) -> Table:
+    t = Table(
+        box=box.SIMPLE_HEAD,
+        header_style="bold cyan",
+        border_style="dim white",
+        show_edge=False,
+        expand=True,
+    )
+    t.add_column("#",          style="dim white",  width=4,  no_wrap=True)
+    t.add_column("URL",        style="white",       ratio=5,  no_wrap=True, overflow="fold")
+    t.add_column("VERDICT",                         ratio=2,  no_wrap=True)
+    t.add_column("GOOGLE",                          width=12, no_wrap=True)
+    t.add_column("MODEL",      style="white",       width=14, no_wrap=True)
+    t.add_column("CONFIDENCE",                      width=19, no_wrap=True)
+    t.add_column("MATCH",                           width=5,  no_wrap=True)
+
+    for i, row in enumerate(rows, 1):
+        verdict = row["verdict"]
+        google  = row["google_verdict"]
+        model   = row["model_prediction"] or "—"
+        conf_r  = row["model_confidence"]
+        conf    = float(conf_r) if conf_r not in (None, "") else None
+        match   = row.get("label_match", "")
+        t.add_row(
+            str(i),
+            row["url"],
+            Text(f"{verdict_icon(verdict)} {verdict}", style=verdict_style(verdict)),
+            Text(f"{google_icon(google)} {google}",    style=google_style(google)),
+            model,
+            conf_bar(conf),
+            Text("YES", style="bold green") if match == "yes" else
+            Text("NO",  style="bold red")   if match == "no"  else
+            Text("—",   style="dim white"),
+        )
+    return t
+
+
+def stat_panel(total: int, allowed: int, blocked: int, errors: int, elapsed: float) -> Panel:
+    t = Text(justify="center")
+    t.append("  TOTAL ",     style="bold white");  t.append(f"{total}   ",   style="bold cyan")
+    t.append(" ✔ ALLOWED ",  style="bold white");  t.append(f"{allowed}   ", style="bold green")
+    t.append(" ✘ BLOCKED ",  style="bold white");  t.append(f"{blocked}   ", style="bold red")
+    t.append(" ! ERRORS ",   style="bold white");  t.append(f"{errors}   ",  style="bold yellow")
+    t.append(" ⏱ TIME ",     style="bold white");  t.append(f"{elapsed:.1f}s", style="bold magenta")
+    return Panel(t, border_style="dim white", padding=(0, 1))
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Batch test multiple URLs against the phishing detector backend and save CSV output."
+        description="Batch-test URLs against the phishing detector backend."
     )
-    parser.add_argument("url", nargs="*", help="One or more URLs/domains to test")
-    parser.add_argument("-f", "--file", help="Read URLs from a text file, one per line")
-    parser.add_argument("--csv-input", help="Read URLs from a CSV file instead of plain text")
-    parser.add_argument("--url-column", default="url", help="CSV column containing the URL to test")
-    parser.add_argument("--label-column", help="Optional CSV column containing the expected label")
-    parser.add_argument("-o", "--output", default="results.csv", help="CSV file to write results to")
-    parser.add_argument("--base-url", default=DEFAULT_BASE_URL, help=f"Backend base URL (default: {DEFAULT_BASE_URL})")
-    parser.add_argument("--timeout", type=float, default=10.0, help="Request timeout in seconds")
-    parser.add_argument("--json", action="store_true", help="Print the raw backend response after each URL")
+    parser.add_argument("url",            nargs="*")
+    parser.add_argument("-f", "--file")
+    parser.add_argument("--csv-input")
+    parser.add_argument("--url-column",   default="url")
+    parser.add_argument("--label-column", default=None)
+    parser.add_argument("-o", "--output", default="results.csv")
+    parser.add_argument("--base-url",     default=DEFAULT_BASE_URL)
+    parser.add_argument("--timeout",      type=float, default=10.0)
+    parser.add_argument("--json",         action="store_true")
+    parser.add_argument("--no-color",     action="store_true")
     args = parser.parse_args()
 
     items = load_items(args)
     if not items:
-        parser.error("provide URLs as arguments, via --file, --csv-input, or through stdin")
+        parser.error("provide URLs via arguments, --file, --csv-input, or stdin")
 
-    output_path = Path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    if not RICH_AVAILABLE or args.no_color:
+        return _run_plain(args, items)
 
-    fieldnames = [
-        "url",
-        "google_verdict",
-        "verdict",
-        "expected_label",
-        "label_match",
-        "google_available",
-        "google_safe_browsing",
-        "model_prediction",
-        "model_status",
-        "model_confidence",
-        "google_flagged",
-        "reasoning",
-        "error",
-        "raw_json",
+    return _run_rich(args, items)
+
+
+def _run_rich(args: argparse.Namespace, items: list[dict]) -> int:
+    total   = len(items)
+    allowed = blocked = errors = 0
+    rows: list[dict] = []
+    start = time.monotonic()
+
+    out = Path(args.output)
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    FIELDNAMES = [
+        "url", "google_verdict", "verdict", "expected_label", "label_match",
+        "google_available", "google_safe_browsing", "model_prediction",
+        "model_status", "model_confidence", "google_flagged",
+        "reasoning", "error", "raw_json",
     ]
 
-    rows: list[dict] = []
-    total = len(items)
+    print_banner(total, args.base_url)
+
+    # KEY FIX: use Progress as a context manager so it owns its own Live
+    # and actually re-renders on each advance(). transient=True wipes it
+    # after the loop so the final table renders cleanly below.
+    progress = Progress(
+        SpinnerColumn(spinner_name="dots2", style="bold red"),
+        TextColumn("[bold white]{task.description}"),
+        BarColumn(bar_width=36, style="dim red", complete_style="bold green",
+                  finished_style="bold green"),
+        MofNCompleteColumn(),
+        TextColumn("[dim white]{task.fields[url]}"),
+        TimeElapsedColumn(),
+        console=console,
+        transient=True,
+    )
+    task = progress.add_task("Scanning", total=total, url="")
+
+    with progress:
+        with out.open("w", newline="", encoding="utf-8") as csv_file:
+            writer = csv.DictWriter(csv_file, fieldnames=FIELDNAMES)
+            writer.writeheader()
+
+            for idx, item in enumerate(items, 1):
+                url   = item["url"]
+                label = normalize_label(item.get("expected_label", ""))
+                short = (url[:52] + "…") if len(url) > 53 else url
+
+                progress.update(task, url=short)
+
+                try:
+                    payload = submit_url(args.base_url, url, args.timeout)
+                    row     = build_row(url, payload)
+                    row["expected_label"] = label
+                    verdict = row["verdict"]
+                    google  = row["google_verdict"]
+                    model   = row["model_prediction"] or "—"
+                    conf_r  = row["model_confidence"]
+                    conf    = float(conf_r) if conf_r not in (None, "") else None
+
+                    if "blocked" in verdict: blocked += 1
+                    elif "allowed" in verdict: allowed += 1
+
+                    if label:
+                        match = "yes" if summarize_verdict(payload) == label else "no"
+                        row["label_match"] = match
+
+                    writer.writerow(row)
+                    rows.append(row)
+
+                    conf_str = f"{conf:5.1f}%" if conf is not None else "  n/a "
+                    vstyle   = verdict_style(verdict)
+                    gstyle   = google_style(google)
+                    match_s  = ""
+                    if row.get("label_match"):
+                        match_s = (
+                            "  [bold green]MATCH[/bold green]"
+                            if row["label_match"] == "yes"
+                            else "  [bold red]WRONG[/bold red]"
+                        )
+
+                    progress.console.print(
+                        f"  [{vstyle}]{verdict_icon(verdict)}[/{vstyle}]"
+                        f"  [dim white]{idx:>3}/{total}[/dim white]"
+                        f"  [white]{url[:60]:<60}[/white]"
+                        f"  [dim white]g=[/dim white][{gstyle}]{google:<11}[/{gstyle}]"
+                        f"  [{vstyle}]{verdict:<28}[/{vstyle}]"
+                        f"  [bold]{conf_str}[/bold]"
+                        + match_s
+                    )
+
+                    if row.get("reasoning"):
+                        progress.console.print(
+                            f"    [dim white]↳ {row['reasoning']}[/dim white]"
+                        )
+                    if args.json:
+                        progress.console.print(json.dumps(payload, indent=2), style="dim")
+
+                except requests.HTTPError as exc:
+                    errors += 1
+                    code = exc.response.status_code if exc.response else "n/a"
+                    row  = build_row(url, {}, error=f"HTTP {code}")
+                    row["expected_label"] = label
+                    writer.writerow(row)
+                    rows.append(row)
+                    progress.console.print(
+                        f"  [bold red]![/bold red]"
+                        f"  [dim white]{idx:>3}/{total}[/dim white]"
+                        f"  [white]{url[:60]:<60}[/white]"
+                        f"  [bold red]HTTP {code}[/bold red]"
+                    )
+
+                except requests.RequestException as exc:
+                    errors += 1
+                    row = build_row(url, {}, error=str(exc))
+                    row["expected_label"] = label
+                    writer.writerow(row)
+                    rows.append(row)
+                    progress.console.print(
+                        f"  [bold red]![/bold red]"
+                        f"  [dim white]{idx:>3}/{total}[/dim white]"
+                        f"  [white]{url[:60]:<60}[/white]"
+                        f"  [bold red]connection failed[/bold red]"
+                    )
+
+                progress.advance(task)
+
+    elapsed = time.monotonic() - start
+
+    console.print()
+    console.print(Rule("[dim white]RESULTS[/dim white]", style="dim white"))
+    console.print()
+    console.print(make_summary_table(rows))
+    console.print()
+    console.print(stat_panel(total, allowed, blocked, errors, elapsed))
+
+    labelled = [r for r in rows if r.get("label_match")]
+    if labelled:
+        correct = sum(1 for r in labelled if r["label_match"] == "yes")
+        acc     = correct / len(labelled) * 100
+        color   = "green" if acc >= 90 else ("yellow" if acc >= 70 else "red")
+        console.print()
+        console.print(Panel(
+            Align.center(
+                Text(f"Accuracy  {correct}/{len(labelled)}  ({acc:.1f}%)", style=f"bold {color}")
+            ),
+            title="[bold white]Label Accuracy[/bold white]",
+            border_style=color,
+            padding=(0, 4),
+        ))
+
+    console.print()
+    console.print(f"  [dim]Saved →[/dim] [bold cyan]{out.resolve()}[/bold cyan]")
+    console.print()
+
+    return 1 if errors else 0
+
+
+def _run_plain(args: argparse.Namespace, items: list[dict]) -> int:
+    total    = len(items)
     failures = 0
+    rows: list[dict] = []
+    out = Path(args.output)
+    out.parent.mkdir(parents=True, exist_ok=True)
 
-    with output_path.open("w", newline="", encoding="utf-8") as csv_file:
-        writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+    FIELDNAMES = [
+        "url", "google_verdict", "verdict", "expected_label", "label_match",
+        "google_available", "google_safe_browsing", "model_prediction",
+        "model_status", "model_confidence", "google_flagged",
+        "reasoning", "error", "raw_json",
+    ]
+
+    with out.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
         writer.writeheader()
-
-        for index, item in enumerate(items, start=1):
-            url = item["url"]
-            expected_label = summarize_expected_label(item.get("expected_label", ""))
-            prefix = f"[{index}/{total}]"
+        for idx, item in enumerate(items, 1):
+            url   = item["url"]
+            label = normalize_label(item.get("expected_label", ""))
             try:
                 payload = submit_url(args.base_url, url, args.timeout)
-                row = build_row(url, payload)
-                row["expected_label"] = expected_label
-                if expected_label:
-                    row["label_match"] = "yes" if summarize_verdict(payload) == expected_label else "no"
+                row     = build_row(url, payload)
+                row["expected_label"] = label
+                if label:
+                    row["label_match"] = "yes" if summarize_verdict(payload) == label else "no"
                 writer.writerow(row)
                 rows.append(row)
-
-                verdict = row["verdict"]
-                google_verdict = row["google_verdict"]
-                model_prediction = row["model_prediction"]
-                confidence = row["model_confidence"]
-                confidence_text = "n/a" if confidence in (None, "") else f"{float(confidence):.2f}%"
-                expected_text = f" | expected={expected_label}" if expected_label else ""
-                match_text = f" | match={row['label_match']}" if row["label_match"] else ""
-                print(f"{prefix} {url} -> google={google_verdict} | final={verdict}{expected_text}{match_text} | model={model_prediction} | confidence={confidence_text}")
-
-                if row["reasoning"]:
-                    print(f"    reasoning: {row['reasoning']}")
-                if row["google_available"]:
-                    print(f"    google_safe_browsing: {row['google_safe_browsing']}")
-
-                if args.json:
-                    print("    raw:")
-                    print(json.dumps(payload, indent=2, sort_keys=True))
-
-            except requests.HTTPError as exc:
-                failures += 1
-                response_text = exc.response.text if exc.response is not None else ""
-                row = build_row(url, {}, error=f"HTTPError: {exc}; response={response_text}")
-                row["expected_label"] = expected_label
-                writer.writerow(row)
-                rows.append(row)
-                print(f"{prefix} {url} -> error | HTTP {exc.response.status_code if exc.response is not None else 'n/a'}")
-                if response_text:
-                    print(f"    {response_text}")
-
+                conf  = row["model_confidence"]
+                conf_s = "n/a" if conf in (None, "") else f"{float(conf):.1f}%"
+                print(f"[{idx}/{total}] {url} -> {row['verdict']} | google={row['google_verdict']} | conf={conf_s}")
             except requests.RequestException as exc:
                 failures += 1
-                row = build_row(url, {}, error=f"RequestException: {exc}")
-                row["expected_label"] = expected_label
+                row = build_row(url, {}, error=str(exc))
+                row["expected_label"] = label
                 writer.writerow(row)
                 rows.append(row)
-                print(f"{prefix} {url} -> error | {exc}")
+                print(f"[{idx}/{total}] {url} -> ERROR: {exc}")
 
-    print(f"Saved {len(rows)} results to {output_path}")
+    print(f"\nSaved {len(rows)} results to {out}")
     if failures:
-        print(f"Completed with {failures} failed request(s).")
+        print(f"{failures} request(s) failed.")
         return 1
     return 0
 
